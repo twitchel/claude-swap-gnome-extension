@@ -5,8 +5,9 @@ import GLib from 'gi://GLib';
 import St from 'gi://St';
 
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-import {panelText, iconState} from './format.js';
+import {panelText, iconState, accountLabel, usageSummary} from './format.js';
 
 const SWITCH_FLASH_MS = 3000;
 
@@ -45,12 +46,23 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         ];
 
         this._snapshot = null;
+        this._handlers = {};
+        this._notFoundPaths = null;
+        this._staleAgeText = '';
+        this._threshold = null;
+
+        this.menu.connect('open-state-changed', (_menu, isOpen) => {
+            if (isOpen && this._handlers.onRefresh)
+                this._handlers.onRefresh();
+        });
     }
 
     /** Store a snapshot and redraw. Pass null to show the unknown state. */
     render(snapshot) {
         this._snapshot = snapshot;
+        this._notFoundPaths = null;
         this._reRender();
+        this._rebuildMenu();
     }
 
     _activeAccount() {
@@ -101,6 +113,126 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
                 this._flashId = 0;
                 return GLib.SOURCE_REMOVE;
             });
+    }
+
+    setHandlers(handlers) {
+        this._handlers = handlers;
+    }
+
+    /** Show the terminal "no binary" state instead of account rows. */
+    setNotFound(triedPaths) {
+        this._notFoundPaths = triedPaths;
+        this._stale = true;
+        this._reRender();
+        this._rebuildMenu();
+    }
+
+    setStaleAge(text) {
+        this._staleAgeText = text;
+    }
+
+    setThresholdChoices(current) {
+        this._threshold = current;
+        this._rebuildMenu();
+    }
+
+    _addAccountRow(account) {
+        const item = new PopupMenu.PopupBaseMenuItem();
+        const box = new St.BoxLayout({vertical: true, x_expand: true});
+
+        box.add_child(new St.Label({text: accountLabel(account)}));
+        box.add_child(new St.Label({
+            text: usageSummary(account, Date.now()),
+            style_class: 'cswap-usage',
+        }));
+
+        item.add_child(box);
+        item.setOrnament(account.active
+            ? PopupMenu.Ornament.DOT
+            : PopupMenu.Ornament.NONE);
+
+        item.connect('activate', () => {
+            if (this._handlers.onSwitchTo)
+                this._handlers.onSwitchTo(account.number);
+        });
+
+        this.menu.addMenuItem(item);
+    }
+
+    _addInsensitive(text, styleClass = null) {
+        const item = new PopupMenu.PopupMenuItem(text, {reactive: false});
+        if (styleClass)
+            item.label.add_style_class_name(styleClass);
+        this.menu.addMenuItem(item);
+        return item;
+    }
+
+    _rebuildMenu() {
+        this.menu.removeAll();
+
+        if (this._notFoundPaths) {
+            this._addInsensitive('cswap not found', 'cswap-error');
+            for (const p of this._notFoundPaths)
+                this._addInsensitive(`  ${p}`, 'cswap-usage');
+            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            const prefs = new PopupMenu.PopupMenuItem('Set path in Settings…');
+            prefs.connect('activate', () => this._handlers.onOpenPrefs?.());
+            this.menu.addMenuItem(prefs);
+            return;
+        }
+
+        if (this._staleAgeText)
+            this._addInsensitive(this._staleAgeText, 'cswap-usage');
+
+        const accounts = this._snapshot?.accounts ?? [];
+        if (accounts.length === 0)
+            this._addInsensitive('No managed accounts');
+        else
+            accounts.forEach(a => this._addAccountRow(a));
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        for (const [label, strategy] of [
+            ['Rotate to next', null],
+            ['Switch to best', 'best'],
+            ['Next available', 'next-available'],
+        ]) {
+            const item = new PopupMenu.PopupMenuItem(label);
+            item.connect('activate', () => this._handlers.onSwitchBy?.(strategy));
+            item.setSensitive(accounts.length > 0);
+            this.menu.addMenuItem(item);
+        }
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        const auto = new PopupMenu.PopupSwitchMenuItem(
+            'Auto-switch', this._settings.get_boolean('auto-switch'));
+        auto.connect('toggled', (_item, state) =>
+            this._handlers.onToggleAuto?.(state));
+        this.menu.addMenuItem(auto);
+
+        const thresholdMenu = new PopupMenu.PopupSubMenuMenuItem(
+            this._threshold === null
+                ? 'Threshold'
+                : `Threshold — ${this._threshold}%`);
+        for (const pct of [80, 90, 95, 98]) {
+            const choice = new PopupMenu.PopupMenuItem(`${pct}%`);
+            if (pct === this._threshold)
+                choice.setOrnament(PopupMenu.Ornament.DOT);
+            choice.connect('activate', () => this._handlers.onSetThreshold?.(pct));
+            thresholdMenu.menu.addMenuItem(choice);
+        }
+        this.menu.addMenuItem(thresholdMenu);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        const refresh = new PopupMenu.PopupMenuItem('Refresh now');
+        refresh.connect('activate', () => this._handlers.onRefresh?.());
+        this.menu.addMenuItem(refresh);
+
+        const settings = new PopupMenu.PopupMenuItem('Settings…');
+        settings.connect('activate', () => this._handlers.onOpenPrefs?.());
+        this.menu.addMenuItem(settings);
     }
 
     destroy() {
