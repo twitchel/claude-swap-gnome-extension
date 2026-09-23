@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "activeAccountNumber": 1,
+  "accounts": [
+    {
+      "number": 1,
+      "email": "alice@example.com",
+      "active": true,
+      "usageStatus": "ok",
+      "usage": {
+        "fiveHour": {
+          "pct": 12.0,
+          "resetsAt": "2026-09-20T00:00:00+00:00"
+        },
+        "sevenDay": {
+          "pct": 88.0,
+          "resetsAt": "2026-09-19T10:00:00+00:00"
+        }
+      }
+    }
+  ]
+}

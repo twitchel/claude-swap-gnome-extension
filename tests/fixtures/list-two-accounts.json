@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "activeAccountNumber": 1,
+  "accounts": [
+    {
+      "number": 1,
+      "email": "alice@example.com",
+      "active": true,
+      "usageStatus": "ok",
+      "usage": {
+        "fiveHour": {
+          "pct": 70.0,
+          "resetsAt": "2026-09-23T05:20:00.450756+00:00",
+          "countdown": "3h 41m",
+          "clock": "15:20"
+        },
+        "sevenDay": {
+          "pct": 45.0,
+          "resetsAt": "2026-09-26T10:00:00.450775+00:00",
+          "countdown": "3d 8h",
+          "clock": "Sep 26 20:00",
+          "expectedPct": 52.2,
+          "aheadOfPace": false
+        }
+      },
+      "usageFetchedAt": "2026-09-23T01:38:33Z",
+      "usageAgeSeconds": 0.7
+    },
+    {
+      "number": 2,
+      "email": "bob@example.net",
+      "active": false,
+      "usageStatus": "ok",
+      "usage": {
+        "fiveHour": {"pct": 0.0},
+        "sevenDay": {
+          "pct": 67.0,
+          "resetsAt": "2026-09-23T09:00:00.133736+00:00",
+          "countdown": "7h 21m",
+          "clock": "19:00",
+          "expectedPct": 95.6,
+          "aheadOfPace": true
+        }
+      },
+      "usageFetchedAt": "2026-09-23T01:38:34Z",
+      "usageAgeSeconds": 0.0
+    }
+  ]
+}
