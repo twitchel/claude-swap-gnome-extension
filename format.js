@@ -183,3 +183,36 @@ export function iconState(account, nowMs) {
         return 'warn';
     return 'ok';
 }
+
+/**
+ * The account list from a snapshot, always as an array of objects.
+ *
+ * claude-swap self-upgrades, so a future release could change this shape.
+ * Callers render from the result directly, and `undefined.length === 0` is
+ * false — which would sail past an emptiness check and throw on forEach,
+ * after the menu had already been torn down.
+ */
+export function accountsOf(snapshot) {
+    const accounts = snapshot?.accounts;
+    if (!Array.isArray(accounts))
+        return [];
+    return accounts.filter(a => a && typeof a === 'object');
+}
+
+/**
+ * A string that changes exactly when the rendered rows would change.
+ *
+ * Rebuilding the menu destroys and recreates every item, which closes any open
+ * submenu under the user's cursor, so it is worth doing only when something
+ * actually differs.
+ */
+export function snapshotSignature(snapshot, nowMs) {
+    return accountsOf(snapshot)
+        .map(a => [
+            a.number,
+            a.active ? '*' : '-',
+            accountLabel(a),
+            usageSummary(a, nowMs),
+        ].join('|'))
+        .join('\n');
+}

@@ -214,3 +214,71 @@ test('a failed spawn does not wedge the client as permanently busy', async () =>
     c.destroy();
     clearStub();
 });
+
+test('rotate issues a bare switch, distinct from next-available', async () => {
+    clearStub();
+    stub({STUB_STDOUT: '{"schemaVersion":1,"accounts":[]}'});
+    const c = new CswapClient({pathOverride: STUB});
+    await c.rotate();
+    assertEqual(c.lastArgs, ['switch', '--json'], 'plain rotate');
+    await c.switchBy('next-available');
+    assertEqual(c.lastArgs, ['switch', '--strategy', 'next-available', '--json'],
+        'strategy form differs');
+    c.destroy();
+    clearStub();
+});
+
+test('a directory is not accepted as the cswap binary', () => {
+    const c = new CswapClient({pathOverride: '/usr/bin'});
+    assertEqual(c.found, false, 'a directory is executable but is not a binary');
+    c.destroy();
+});
+
+test('whenIdle resolves once the in-flight call completes', async () => {
+    clearStub();
+    stub({STUB_SLEEP: 1, STUB_STDOUT: '{"schemaVersion":1,"accounts":[]}'});
+    const c = new CswapClient({pathOverride: STUB});
+    const first = c.listAccounts();
+    assertEqual(c.busy, true, 'busy');
+    await c.whenIdle();
+    assertEqual(c.busy, false, 'idle after whenIdle');
+    await first;
+    c.destroy();
+    clearStub();
+});
+
+test('whenIdle resolves immediately when nothing is in flight', async () => {
+    const c = new CswapClient({pathOverride: STUB});
+    await c.whenIdle();
+    assertEqual(c.busy, false, 'still idle');
+    c.destroy();
+});
+
+test('whenIdle lets a queued user action run instead of erroring', async () => {
+    clearStub();
+    stub({STUB_SLEEP: 1, STUB_STDOUT: '{"schemaVersion":1,"accounts":[]}'});
+    const c = new CswapClient({pathOverride: STUB});
+    const poll = c.listAccounts();
+    await c.whenIdle();
+    const result = await c.switchTo(2);
+    assertEqual(result.schemaVersion, 1, 'the user action actually ran');
+    await poll;
+    c.destroy();
+    clearStub();
+});
+
+test('a call that exceeds its timeout rejects rather than hanging', async () => {
+    clearStub();
+    stub({STUB_SLEEP: 5, STUB_STDOUT: '{"schemaVersion":1,"accounts":[]}'});
+    const c = new CswapClient({pathOverride: STUB, timeoutMs: 400});
+    let msg = '';
+    try {
+        await c.listAccounts();
+    } catch (e) {
+        msg = e.message;
+    }
+    assertEqual(msg.includes('timed out'), true, `should time out, got: ${msg}`);
+    assertEqual(c.busy, false, 'not wedged after a timeout');
+    c.destroy();
+    clearStub();
+});

@@ -1,6 +1,6 @@
 import {test, assertEqual, assertNull, loadFixture} from './harness.js';
 import {tightestPct, liveCountdown, rolledWeeklyWindow, usageSummary,
-    accountLabel, panelText, iconState} from '../format.js';
+    accountLabel, panelText, iconState, accountsOf, snapshotSignature} from '../format.js';
 
 const NOW = Date.parse('2026-09-23T01:40:00Z');
 
@@ -187,4 +187,48 @@ test('iconState buckets above 95 as crit', () => {
 
 test('iconState falls back to ok when usage is unknown', () => {
     assertEqual(iconState({usageStatus: 'auth failed'}, NOW), 'ok', 'no colour alarm without data');
+});
+
+test('accountsOf returns the array when it is well formed', () => {
+    const snap = loadFixture('list-two-accounts');
+    assertEqual(accountsOf(snap).length, 2, 'both accounts');
+});
+
+test('accountsOf returns empty when accounts is not an array', () => {
+    assertEqual(accountsOf({accounts: {a: 1}}), [], 'object instead of array');
+});
+
+test('accountsOf returns empty for a missing snapshot', () => {
+    assertEqual(accountsOf(null), [], 'no snapshot');
+});
+
+test('accountsOf drops null and non-object entries', () => {
+    const snap = {accounts: [{number: 1}, null, 'nonsense', {number: 2}]};
+    assertEqual(accountsOf(snap).length, 2, 'only real entries survive');
+});
+
+test('snapshotSignature is stable across identical snapshots', () => {
+    const a = loadFixture('list-two-accounts');
+    const b = loadFixture('list-two-accounts');
+    assertEqual(snapshotSignature(a, NOW) === snapshotSignature(b, NOW), true, 'stable');
+});
+
+test('snapshotSignature changes when a percentage changes', () => {
+    const a = loadFixture('list-two-accounts');
+    const b = loadFixture('list-two-accounts');
+    b.accounts[0].usage.fiveHour.pct = 71;
+    assertEqual(snapshotSignature(a, NOW) === snapshotSignature(b, NOW), false, 'differs');
+});
+
+test('snapshotSignature changes when the active account changes', () => {
+    const a = loadFixture('list-two-accounts');
+    const b = loadFixture('list-two-accounts');
+    b.accounts[0].active = false;
+    b.accounts[1].active = true;
+    assertEqual(snapshotSignature(a, NOW) === snapshotSignature(b, NOW), false, 'differs');
+});
+
+test('snapshotSignature tolerates a malformed snapshot', () => {
+    assertEqual(typeof snapshotSignature({accounts: 'nope'}, NOW), 'string', 'still a string');
+    assertEqual(typeof snapshotSignature(null, NOW), 'string', 'still a string');
 });

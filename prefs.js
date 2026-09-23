@@ -72,9 +72,17 @@ export default class ClaudeSwapPreferences extends ExtensionPreferences {
         });
         page.add(advancedGroup);
 
-        const pathRow = new Adw.EntryRow({title: 'Path to cswap'});
-        settings.bind('cswap-path', pathRow, 'text',
-            Gio.SettingsBindFlags.DEFAULT);
+        // Apply mode, not a live bind: Adw.EntryRow notifies `text` on every
+        // keystroke, and each write restarts the poller. Typing a 28-character
+        // path would tear down and rebuild the client 28 times, spawning a
+        // failed process for each intermediate value.
+        const pathRow = new Adw.EntryRow({
+            title: 'Path to cswap',
+            show_apply_button: true,
+        });
+        pathRow.text = settings.get_string('cswap-path');
+        pathRow.connect('apply',
+            row => settings.set_string('cswap-path', row.text.trim()));
         advancedGroup.add(pathRow);
     }
 }

@@ -8,7 +8,8 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {panelText, iconState, accountLabel, usageSummary} from './format.js';
+import {panelText, iconState, accountLabel, usageSummary, accountsOf,
+    snapshotSignature} from './format.js';
 
 const SWITCH_FLASH_MS = 3000;
 
@@ -51,6 +52,8 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         this._notFoundPaths = null;
         this._staleAgeText = '';
         this._threshold = null;
+        this._menuSignature = null;
+        this._pendingRebuild = false;
 
         this._client = null;
         this._timerId = 0;
@@ -64,7 +67,14 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
                 () => this._restartTimer()));
 
         this.menu.connect('open-state-changed', (_menu, isOpen) => {
-            if (!isOpen || !this._client?.found)
+            if (!isOpen) {
+                // A refresh that landed while the menu was open was deferred so
+                // it could not collapse a submenu under the cursor. Apply it now.
+                if (this._pendingRebuild)
+                    this._safeRebuild(true);
+                return;
+            }
+            if (!this._client?.found)
                 return;
             // Sequential, not concurrent: the client is single-flight, so
             // firing both at once would reject one of them as busy.
@@ -83,14 +93,11 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         this._snapshot = snapshot;
         this._notFoundPaths = null;
         this._reRender();
-        this._rebuildMenu();
+        this._safeRebuild();
     }
 
     _activeAccount() {
-        const snap = this._snapshot;
-        if (!snap?.accounts?.length)
-            return null;
-        return snap.accounts.find(a => a.active) ?? null;
+        return accountsOf(this._snapshot).find(a => a.active) ?? null;
     }
 
     _reRender() {
@@ -145,7 +152,7 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         this._notFoundPaths = triedPaths;
         this._stale = true;
         this._reRender();
-        this._rebuildMenu();
+        this._safeRebuild(true);
     }
 
     setStaleAge(text) {
@@ -153,8 +160,10 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
     }
 
     setThresholdChoices(current) {
+        if (this._threshold === current)
+            return;
         this._threshold = current;
-        this._rebuildMenu();
+        this._safeRebuild();
     }
 
     _addAccountRow(account) {
@@ -188,6 +197,41 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         return item;
     }
 
+    /**
+     * Rebuild only when the rows would actually differ, and never out from
+     * under an open submenu — removeAll() destroys it mid-interaction.
+     * Any failure here must not propagate: this runs from a GLib callback.
+     */
+    _safeRebuild(force = false) {
+        try {
+            const sig = [
+                this._notFoundPaths ? 'nf' : '',
+                this._staleAgeText,
+                this._threshold,
+                snapshotSignature(this._snapshot, Date.now()),
+            ].join('\x1e');
+
+            if (!force && sig === this._menuSignature)
+                return;
+
+            if (!force && this.menu.isOpen && this._hasOpenSubMenu()) {
+                this._pendingRebuild = true;
+                return;
+            }
+
+            this._menuSignature = sig;
+            this._pendingRebuild = false;
+            this._rebuildMenu();
+        } catch (e) {
+            logError(e, 'claude-swap: menu rebuild failed');
+        }
+    }
+
+    _hasOpenSubMenu() {
+        return this.menu._getMenuItems()
+            .some(item => item.menu && item.menu.isOpen);
+    }
+
     _rebuildMenu() {
         this.menu.removeAll();
 
@@ -205,7 +249,7 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         if (this._staleAgeText)
             this._addInsensitive(this._staleAgeText, 'cswap-usage');
 
-        const accounts = this._snapshot?.accounts ?? [];
+        const accounts = accountsOf(this._snapshot);
         if (accounts.length === 0)
             this._addInsensitive('No managed accounts');
         else
@@ -267,9 +311,9 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
             onSwitchTo: n => this._doSwitch(() => client.switchTo(n)),
             onSwitchBy: strategy => this._doSwitch(() =>
                 strategy === null
-                    ? client.switchBy('next-available')
+                    ? client.rotate()
                     : client.switchBy(strategy)),
-            onRefresh: () => this._poll(),
+            onRefresh: () => this._userPoll(),
             onToggleAuto: state => this._settings.set_boolean('auto-switch', state),
             onSetThreshold: pct => this._doSetThreshold(pct),
             onOpenPrefs: () => this._extension.openPreferences(),
@@ -357,7 +401,7 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
             this.setStaleAge('no usage data yet');
         }
         this.setStale(true);
-        this._rebuildMenu();
+        this._safeRebuild(true);
     }
 
     async _autoTick() {
@@ -394,8 +438,23 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         }
     }
 
+    /** A refresh the user asked for: wait rather than silently no-op. */
+    async _userPoll() {
+        if (this._destroyed || !this._client)
+            return;
+        await this._client.whenIdle();
+        if (!this._destroyed)
+            await this._poll();
+    }
+
     async _doSwitch(fn) {
         try {
+            // The menu-open poll may still be running; the client is
+            // single-flight, so issuing now would reject the click as "busy"
+            // and surface an internal error message to the user.
+            await this._client?.whenIdle();
+            if (this._destroyed)
+                return;
             await fn();
         } catch (e) {
             if (!this._destroyed)
@@ -403,12 +462,18 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         }
         // Refresh whether it worked or not, so the panel never shows a stale
         // active account after a failed switch.
-        if (!this._destroyed)
-            await this._poll();
+        if (!this._destroyed) {
+            await this._client?.whenIdle();
+            if (!this._destroyed)
+                await this._poll();
+        }
     }
 
     async _doSetThreshold(pct) {
         try {
+            await this._client.whenIdle();
+            if (this._destroyed)
+                return;
             await this._client.setThreshold(pct);
             if (!this._destroyed)
                 this.setThresholdChoices(pct);

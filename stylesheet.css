@@ -19,10 +19,12 @@
   opacity: 0.5;
 }
 
-/* The dim second line of an account row. */
+/* The dim second line of an account row. Dim via opacity rather than a
+   hardcoded white: this line carries the usage numbers, and a fixed light
+   colour renders them near-invisible on a light shell theme. */
 .cswap-usage {
   font-size: 0.85em;
-  color: rgba(255, 255, 255, 0.55);
+  opacity: 0.55;
 }
 
 .cswap-error {

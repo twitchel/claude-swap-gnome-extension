@@ -1,7 +1,7 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
-const CALL_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 10000;
 
 /**
  * Async wrapper around the cswap CLI. The only module that spawns a process.
@@ -12,9 +12,11 @@ const CALL_TIMEOUT_MS = 10000;
  * always resolved to an absolute path first.
  */
 export class CswapClient {
-    constructor({pathOverride = ''} = {}) {
+    constructor({pathOverride = '', timeoutMs = DEFAULT_TIMEOUT_MS} = {}) {
         this._cancellable = new Gio.Cancellable();
+        this._timeoutMs = timeoutMs;
         this._inFlight = null;
+        this._inFlightPromise = null;
         this.lastArgs = null;
         this.schemaWarned = false;
 
@@ -33,8 +35,12 @@ export class CswapClient {
             ].filter(p => !!p);
         }
 
-        this._binary = this._tried.find(
-            p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE)) ?? null;
+        // IS_EXECUTABLE alone is true for directories, so `/home/me/.local/bin`
+        // would resolve as "found" and then fail to spawn on every tick,
+        // routing around the self-explanatory notFound state.
+        this._binary = this._tried.find(p =>
+            GLib.file_test(p, GLib.FileTest.IS_REGULAR) &&
+            GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE)) ?? null;
     }
 
     get found() {
@@ -56,6 +62,24 @@ export class CswapClient {
     destroy() {
         this._cancellable.cancel();
         this._inFlight = null;
+        this._inFlightPromise = null;
+    }
+
+    /**
+     * Resolve once nothing is in flight.
+     *
+     * The client is single-flight, so a user action issued while the menu-open
+     * poll is still running would otherwise be rejected as "busy" and surface
+     * as an error notification. Callers acting on a click await this first.
+     */
+    async whenIdle() {
+        while (this._inFlightPromise) {
+            try {
+                await this._inFlightPromise;
+            } catch {
+                // the in-flight call's own caller handles its failure
+            }
+        }
     }
 
     /**
@@ -74,6 +98,8 @@ export class CswapClient {
 
         this._inFlight = args.join(' ');
         this.lastArgs = [...args];
+        let settle;
+        this._inFlightPromise = new Promise(res => (settle = res));
 
         let timeoutId = 0;
         let parentHandler = 0;
@@ -90,7 +116,7 @@ export class CswapClient {
             parentHandler = this._cancellable.connect(() => cancellable.cancel());
 
             return await new Promise((resolve, reject) => {
-                timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CALL_TIMEOUT_MS, () => {
+                timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._timeoutMs, () => {
                     timeoutId = 0;
                     cancellable.cancel();
                     reject(new Error(`cswap ${args.join(' ')} timed out`));
@@ -116,6 +142,8 @@ export class CswapClient {
             if (parentHandler)
                 this._cancellable.disconnect(parentHandler);
             this._inFlight = null;
+            this._inFlightPromise = null;
+            settle();
         }
     }
 
@@ -153,6 +181,17 @@ export class CswapClient {
 
     async switchBy(strategy) {
         return this._runJson(['switch', '--strategy', strategy, '--json']);
+    }
+
+    /**
+     * Plain round-robin to the next slot.
+     *
+     * Distinct from switchBy('next-available'), which skips rate-limited
+     * accounts: `cswap switch` rotates, `--strategy next-available` rotates
+     * while skipping. They only differ when an account is at its limit.
+     */
+    async rotate() {
+        return this._runJson(['switch', '--json']);
     }
 
     /**
