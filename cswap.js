@@ -41,6 +41,10 @@ export class CswapClient {
         return this._binary !== null;
     }
 
+    get busy() {
+        return this._inFlight !== null;
+    }
+
     get binary() {
         return this._binary;
     }
@@ -65,15 +69,26 @@ export class CswapClient {
                 `cswap not found; tried:\n${this._tried.join('\n')}`);
         }
 
-        const proc = Gio.Subprocess.new(
-            [this._binary, ...args],
-            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+        if (this._inFlight)
+            throw new Error(`cswap is busy running: ${this._inFlight}`);
+
+        this._inFlight = args.join(' ');
+        this.lastArgs = [...args];
 
         let timeoutId = 0;
+        let parentHandler = 0;
         const cancellable = new Gio.Cancellable();
-        const parentHandler = this._cancellable.connect(() => cancellable.cancel());
 
         try {
+            // Spawning lives inside the try so a spawn failure still runs the
+            // finally: otherwise _inFlight would stay set and wedge the client
+            // as permanently busy.
+            const proc = Gio.Subprocess.new(
+                [this._binary, ...args],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+
+            parentHandler = this._cancellable.connect(() => cancellable.cancel());
+
             return await new Promise((resolve, reject) => {
                 timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CALL_TIMEOUT_MS, () => {
                     timeoutId = 0;
@@ -98,7 +113,9 @@ export class CswapClient {
         } finally {
             if (timeoutId)
                 GLib.Source.remove(timeoutId);
-            this._cancellable.disconnect(parentHandler);
+            if (parentHandler)
+                this._cancellable.disconnect(parentHandler);
+            this._inFlight = null;
         }
     }
 
@@ -128,5 +145,62 @@ export class CswapClient {
 
     async listAccounts() {
         return this._runJson(['list', '--json']);
+    }
+
+    async switchTo(number) {
+        return this._runJson(['switch', String(number), '--json']);
+    }
+
+    async switchBy(strategy) {
+        return this._runJson(['switch', '--strategy', strategy, '--json']);
+    }
+
+    /**
+     * One auto-switch tick. Exit codes are outcomes, not failures:
+     * 0 switched, 1 error, 2 no action needed, 3 blocked.
+     */
+    async autoOnce({dryRun = false} = {}) {
+        const args = ['auto', '--once', '--json'];
+        if (dryRun)
+            args.push('--dry-run');
+
+        const {stdout, status} = await this._run(args);
+        const events = stdout
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.startsWith('{'))
+            .map(line => {
+                try {
+                    return JSON.parse(line);
+                } catch {
+                    return null;
+                }
+            })
+            .filter(e => e !== null);
+
+        return {code: status, events};
+    }
+
+    /**
+     * Auto-switch policy lives in claude-swap's own settings, not ours, so the
+     * CLI and the panel never disagree about the threshold.
+     */
+    async getThreshold() {
+        const {stdout, status} = await this._run(['config']);
+        if (status !== 0)
+            return null;
+        for (const line of stdout.split('\n')) {
+            const m = line.match(/^autoswitch\.threshold\s+(\d+(?:\.\d+)?)/);
+            if (m)
+                return Number(m[1]);
+        }
+        return null;
+    }
+
+    async setThreshold(pct) {
+        const {status, stderr} = await this._run(
+            ['config', 'set', 'autoswitch.threshold', String(pct)]);
+        if (status !== 0)
+            throw new Error(`could not set threshold: ${stderr.trim() || status}`);
     }
 }
