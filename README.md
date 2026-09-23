@@ -7,28 +7,9 @@ its rate limits and lets you switch accounts without opening a terminal.
 This is a port of `cswap menubar` — claude-swap's macOS menu bar app, which is built on
 `rumps` and does not run on Linux.
 
-```
-  ┌ panel ─────────────────────────────────────────────┐
-  │  …   🌡 42°   18%    🤖 70%    wifi  vol  batt     │
-  └────────────────────────────────────────────────────┘
-                          │
-        ○ alice
-          5h ▁▁▁▁▁▁▁▁▁▁┃▁▁   0%
-          7d ████▁▁▁▁▁▁┃▁▁  48%  3d 3h
-        ● bob                                    ← dot marks the active account
-          5h ████████▇▁┃▁▁  89%  3h 34m
-          7d ███████▁▁▁┃▁▁  77%  2h 34m
-        ──────────────────────────────
-          Rotate to next
-          Switch to best
-          Next available
-        ──────────────────────────────
-          Auto-switch                  [ off ]
-            Threshold      80 · 90 · 95 · 98
-        ──────────────────────────────
-          Refresh now
-          Settings…
-```
+<img src="docs/images/menu.png" alt="The Claude Swap menu open in the GNOME top bar, showing two accounts with 5h and 7d usage bars" width="336">
+
+*Screenshot uses placeholder accounts.*
 
 Each account gets a bar per window. The `┃` tick marks the auto-switch trigger, so you can
 see at a glance how much headroom is left before a switch fires.
