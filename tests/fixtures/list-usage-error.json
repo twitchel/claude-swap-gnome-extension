@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "activeAccountNumber": 1,
+  "accounts": [
+    {
+      "number": 1,
+      "email": "alice@example.com",
+      "active": true,
+      "usageStatus": "auth failed",
+      "usage": null
+    },
+    {
+      "number": 2,
+      "email": "bob@example.net",
+      "active": false,
+      "usageStatus": "backoff"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "uuid": "claude-swap@danieljones.net",
+  "name": "Claude Swap",
+  "description": "Shows the active claude-swap account's rate-limit usage in the top bar, and switches accounts without a terminal.",
+  "shell-version": ["50"],
+  "settings-schema": "org.gnome.shell.extensions.claude-swap",
+  "version": 1
+}

@@ -1,0 +1,37 @@
+/* Panel icon colour states. The icon is a symbolic SVG, so `color` recolours it. */
+.cswap-ok {
+  color: inherit;
+}
+
+.cswap-warn {
+  color: #f5c211;
+}
+
+.cswap-crit {
+  color: #ff7b63;
+}
+
+.cswap-switched {
+  color: #78aeed;
+}
+
+.cswap-stale {
+  opacity: 0.5;
+}
+
+/* The dim second line of an account row. Dim via opacity rather than a
+   hardcoded white: this line carries the usage numbers, and a fixed light
+   colour renders them near-invisible on a light shell theme. */
+.cswap-usage {
+  font-size: 0.85em;
+  opacity: 0.55;
+}
+
+.cswap-error {
+  color: #ff7b63;
+}
+
+/* Keep the panel label from crowding the icon. */
+.cswap-label {
+  padding-left: 4px;
+}
