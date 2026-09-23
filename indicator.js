@@ -6,6 +6,7 @@ import St from 'gi://St';
 
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {panelText, iconState, accountLabel, usageSummary} from './format.js';
 
@@ -51,9 +52,29 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         this._staleAgeText = '';
         this._threshold = null;
 
+        this._client = null;
+        this._timerId = 0;
+        this._destroyed = false;
+        this._failures = 0;
+        this._lastGoodAt = 0;
+        this._blockedNotifiedAt = 0;
+
+        this._settingsIds.push(
+            this._settings.connect('changed::refresh-interval',
+                () => this._restartTimer()));
+
         this.menu.connect('open-state-changed', (_menu, isOpen) => {
-            if (isOpen && this._handlers.onRefresh)
-                this._handlers.onRefresh();
+            if (!isOpen || !this._client?.found)
+                return;
+            // Sequential, not concurrent: the client is single-flight, so
+            // firing both at once would reject one of them as busy.
+            this._poll()
+                .then(() => this._client?.getThreshold())
+                .then(pct => {
+                    if (!this._destroyed && pct !== undefined && pct !== null)
+                        this.setThresholdChoices(pct);
+                })
+                .catch(() => {});
         });
     }
 
@@ -235,7 +256,170 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(settings);
     }
 
+    start(client) {
+        // stop() sets _destroyed, and extension.js calls stop()/start() around
+        // a cswap-path change. Without this reset the indicator would stay dead
+        // after the user corrected the path — every poll would return early.
+        this._destroyed = false;
+        this._client = client;
+
+        this.setHandlers({
+            onSwitchTo: n => this._doSwitch(() => client.switchTo(n)),
+            onSwitchBy: strategy => this._doSwitch(() =>
+                strategy === null
+                    ? client.switchBy('next-available')
+                    : client.switchBy(strategy)),
+            onRefresh: () => this._poll(),
+            onToggleAuto: state => this._settings.set_boolean('auto-switch', state),
+            onSetThreshold: pct => this._doSetThreshold(pct),
+            onOpenPrefs: () => this._extension.openPreferences(),
+        });
+
+        if (!client.found) {
+            this.setNotFound(client.triedPaths);
+            return;
+        }
+
+        this._poll();
+        this._restartTimer();
+    }
+
+    stop() {
+        this._destroyed = true;
+        if (this._timerId) {
+            GLib.Source.remove(this._timerId);
+            this._timerId = 0;
+        }
+        this._client?.destroy();
+        this._client = null;
+    }
+
+    _interval() {
+        // Back off after repeated failures so a broken cswap does not spawn a
+        // process every minute forever.
+        return this._failures >= 3
+            ? 300
+            : this._settings.get_int('refresh-interval');
+    }
+
+    _restartTimer() {
+        if (this._timerId) {
+            GLib.Source.remove(this._timerId);
+            this._timerId = 0;
+        }
+        if (this._destroyed || !this._client?.found)
+            return;
+        this._timerId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT, this._interval(), () => {
+                this._poll();
+                return GLib.SOURCE_CONTINUE;
+            });
+    }
+
+    async _poll() {
+        if (this._destroyed || !this._client || this._client.busy)
+            return;
+
+        const wasBackedOff = this._failures >= 3;
+
+        try {
+            const snapshot = await this._client.listAccounts();
+            if (this._destroyed)
+                return;
+
+            this._failures = 0;
+            this._lastGoodAt = Date.now();
+            this.setStaleAge('');
+            this._stale = false;
+            this.render(snapshot);
+
+            if (wasBackedOff)
+                this._restartTimer();
+
+            if (this._settings.get_boolean('auto-switch'))
+                await this._autoTick();
+        } catch (e) {
+            if (this._destroyed)
+                return;
+            this._failures++;
+            console.warn(`claude-swap: refresh failed: ${e.message}`);
+            this._markStale();
+            if (this._failures === 3)
+                this._restartTimer();
+        }
+    }
+
+    _markStale() {
+        if (this._lastGoodAt) {
+            const mins = Math.floor((Date.now() - this._lastGoodAt) / 60000);
+            this.setStaleAge(`stale — last read ${mins}m ago`);
+        } else {
+            this.setStaleAge('no usage data yet');
+        }
+        this.setStale(true);
+        this._rebuildMenu();
+    }
+
+    async _autoTick() {
+        try {
+            const {code, events} = await this._client.autoOnce({});
+            if (this._destroyed)
+                return;
+
+            if (code === 0) {
+                this.flashSwitched();
+                if (this._settings.get_boolean('notify-on-switch')) {
+                    const to = events.find(e => e.to !== undefined)?.to;
+                    Main.notify('Claude Swap',
+                        to !== undefined
+                            ? `Switched to account ${to}`
+                            : 'Switched account');
+                }
+                await this._poll();
+            } else if (code === 3) {
+                // Rate-limit this notification: an all-exhausted state would
+                // otherwise fire one every tick.
+                const now = Date.now();
+                if (now - this._blockedNotifiedAt > 3600000) {
+                    this._blockedNotifiedAt = now;
+                    Main.notify('Claude Swap',
+                        'No account has headroom to switch to');
+                }
+            } else if (code === 1) {
+                console.warn('claude-swap: auto-switch tick reported an error');
+            }
+        } catch (e) {
+            if (!this._destroyed)
+                console.warn(`claude-swap: auto-switch failed: ${e.message}`);
+        }
+    }
+
+    async _doSwitch(fn) {
+        try {
+            await fn();
+        } catch (e) {
+            if (!this._destroyed)
+                Main.notifyError('Claude Swap', e.message.split('\n')[0]);
+        }
+        // Refresh whether it worked or not, so the panel never shows a stale
+        // active account after a failed switch.
+        if (!this._destroyed)
+            await this._poll();
+    }
+
+    async _doSetThreshold(pct) {
+        try {
+            await this._client.setThreshold(pct);
+            if (!this._destroyed)
+                this.setThresholdChoices(pct);
+        } catch (e) {
+            if (!this._destroyed)
+                Main.notifyError('Claude Swap', e.message.split('\n')[0]);
+        }
+    }
+
     destroy() {
+        this.stop();
         if (this._flashId) {
             GLib.Source.remove(this._flashId);
             this._flashId = 0;
