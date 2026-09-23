@@ -1,5 +1,6 @@
 import {test, assertEqual, assertNull, loadFixture} from './harness.js';
-import {tightestPct, liveCountdown, rolledWeeklyWindow, usageSummary} from '../format.js';
+import {tightestPct, liveCountdown, rolledWeeklyWindow, usageSummary,
+    accountLabel, panelText, iconState} from '../format.js';
 
 const NOW = Date.parse('2026-09-23T01:40:00Z');
 
@@ -113,4 +114,77 @@ test('usageSummary falls back when usage is absent and status is ok', () => {
 test('usageSummary never emits NaN or undefined', () => {
     const s = usageSummary({usageStatus: 'ok', usage: {fiveHour: {pct: null}}}, NOW);
     assertEqual(s.includes('NaN') || s.includes('undefined'), false, `clean output, got: ${s}`);
+});
+
+const P = (panelTextMode, showAccountName = false) =>
+    ({panelText: panelTextMode, showAccountName});
+
+test('accountLabel prefers the alias', () => {
+    assertEqual(accountLabel({email: 'a@b.com', alias: 'work'}), 'work', 'alias wins');
+});
+
+test('accountLabel falls back to the email local part', () => {
+    assertEqual(accountLabel({email: 'alice@example.com'}), 'alice', 'local part');
+});
+
+test('accountLabel truncates a long local part', () => {
+    assertEqual(accountLabel({email: 'averyveryverylongname@x.com'}), 'averyveryve*', 'truncated');
+});
+
+test('accountLabel handles a missing email', () => {
+    assertEqual(accountLabel({}), '', 'no email');
+});
+
+test('panelText none shows nothing', () => {
+    const a = loadFixture('list-two-accounts').accounts[0];
+    assertEqual(panelText(a, P('none'), NOW), '', 'icon only');
+});
+
+test('panelText tightest shows one number', () => {
+    const a = loadFixture('list-two-accounts').accounts[0];
+    assertEqual(panelText(a, P('tightest'), NOW), '70%', 'tightest window');
+});
+
+test('panelText both shows two numbers', () => {
+    const a = loadFixture('list-two-accounts').accounts[0];
+    assertEqual(panelText(a, P('both'), NOW), '70% · 45%', 'five-hour then weekly');
+});
+
+test('panelText prefixes the account name when asked', () => {
+    const a = loadFixture('list-two-accounts').accounts[0];
+    assertEqual(panelText(a, P('both', true), NOW), 'alice · 70% · 45%', 'name first');
+});
+
+test('panelText 7d reflects a rolled-over weekly window', () => {
+    const a = loadFixture('list-expired-weekly').accounts[0];
+    assertEqual(panelText(a, P('7d'), NOW), '0%', 'rolled to zero');
+});
+
+test('panelText returns empty string for a null account', () => {
+    assertEqual(panelText(null, P('tightest'), NOW), '', 'nothing active');
+});
+
+test('panelText omits the number when usage is unavailable', () => {
+    assertEqual(panelText({email: 'a@b.com', usageStatus: 'ok'}, P('tightest'), NOW),
+        '', 'no number to show');
+});
+
+test('iconState buckets below 80 as ok', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 79.4}}}, NOW), 'ok', 'under threshold');
+});
+
+test('iconState buckets 80 as warn', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 80}}}, NOW), 'warn', 'boundary is warn');
+});
+
+test('iconState buckets 95 as warn', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 95}}}, NOW), 'warn', 'upper boundary');
+});
+
+test('iconState buckets above 95 as crit', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 95.1}}}, NOW), 'crit', 'over threshold');
+});
+
+test('iconState falls back to ok when usage is unknown', () => {
+    assertEqual(iconState({usageStatus: 'auth failed'}, NOW), 'ok', 'no colour alarm without data');
 });

@@ -98,3 +98,88 @@ export function usageSummary(account, nowMs) {
 
     return parts.length ? parts.join(' · ') : 'usage unavailable';
 }
+
+const LOCAL_PART_LIMIT = 12;
+
+/** Alias when set, else the email's local part, truncated with a '*' marker. */
+export function accountLabel(account) {
+    if (account?.alias)
+        return account.alias;
+    const email = account?.email;
+    if (typeof email !== 'string')
+        return '';
+    const local = email.split('@', 1)[0];
+    if (local.length > LOCAL_PART_LIMIT)
+        return `${local.slice(0, LOCAL_PART_LIMIT - 1)}*`;
+    return local;
+}
+
+function pctOf(window) {
+    return window && typeof window.pct === 'number' ? `${window.pct.toFixed(0)}%` : null;
+}
+
+/** The panel label. Returns '' when there is nothing to show beside the icon. */
+export function panelText(account, prefs, nowMs) {
+    if (!account)
+        return '';
+
+    const segments = [];
+    if (prefs.showAccountName) {
+        const name = accountLabel(account);
+        if (name)
+            segments.push(name);
+    }
+
+    const usage = account.usage;
+    const weekly = rolledWeeklyWindow(usage?.sevenDay, nowMs);
+
+    switch (prefs.panelText) {
+    case 'none':
+        break;
+    case 'tightest': {
+        const p = tightestPct(usage);
+        if (p !== null)
+            segments.push(`${p.toFixed(0)}%`);
+        break;
+    }
+    case '5h': {
+        const s = pctOf(usage?.fiveHour);
+        if (s)
+            segments.push(s);
+        break;
+    }
+    case '7d': {
+        const s = pctOf(weekly);
+        if (s)
+            segments.push(s);
+        break;
+    }
+    case 'both': {
+        const a = pctOf(usage?.fiveHour);
+        const b = pctOf(weekly);
+        if (a)
+            segments.push(a);
+        if (b)
+            segments.push(b);
+        break;
+    }
+    }
+
+    return segments.join(' · ');
+}
+
+/** Colour bucket for the panel icon, from the tightest window. */
+export function iconState(account, nowMs) {
+    const usage = account?.usage;
+    if (!usage)
+        return 'ok';
+    const rolled = {...usage, sevenDay: rolledWeeklyWindow(usage.sevenDay, nowMs)};
+    const p = tightestPct(rolled);
+    if (p === null)
+        return 'ok';
+    if (p > 95)
+        return 'crit';
+    if (p >= 80)
+        return 'warn';
+    return 'ok';
+}
