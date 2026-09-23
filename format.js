@@ -45,3 +45,56 @@ export function liveCountdown(resetsAt, nowMs) {
         return `${hours}h ${minutes}m`;
     return `${minutes}m`;
 }
+
+const WEEK_MS = 7 * 86400 * 1000;
+
+/**
+ * A weekly window whose reset has passed, advanced to its next 7-day boundary.
+ *
+ * Weekly limits reset on a fixed cadence, so a resetsAt in the past means the
+ * window rolled over and the stored pct belongs to a cycle that is gone.
+ * Returns a copy — never mutates the caller's object.
+ */
+export function rolledWeeklyWindow(window, nowMs) {
+    if (!window || typeof window !== 'object')
+        return null;
+    const ts = Date.parse(window.resetsAt);
+    if (Number.isNaN(ts) || ts > nowMs)
+        return window;
+
+    let next = ts;
+    while (next <= nowMs)
+        next += WEEK_MS;
+
+    return {...window, pct: 0, resetsAt: new Date(next).toISOString()};
+}
+
+function segment(label, window, nowMs) {
+    if (!window || typeof window.pct !== 'number')
+        return null;
+    let seg = `${label} ${window.pct.toFixed(0)}%`;
+    if (window.aheadOfPace)
+        seg += ' (ahead)';
+    const countdown = liveCountdown(window.resetsAt, nowMs);
+    if (countdown)
+        seg += ` (${countdown})`;
+    return seg;
+}
+
+/** One-line usage summary for an account row. */
+export function usageSummary(account, nowMs) {
+    const status = account?.usageStatus;
+    if (status && status !== 'ok')
+        return status;
+
+    const usage = account?.usage;
+    if (!usage || typeof usage !== 'object')
+        return 'usage unavailable';
+
+    const parts = [
+        segment('5h', usage.fiveHour, nowMs),
+        segment('7d', rolledWeeklyWindow(usage.sevenDay, nowMs), nowMs),
+    ].filter(s => s !== null);
+
+    return parts.length ? parts.join(' · ') : 'usage unavailable';
+}
