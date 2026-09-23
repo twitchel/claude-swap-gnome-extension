@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <enum id="org.gnome.shell.extensions.claude-swap.panel-text">
+    <value nick="none" value="0"/>
+    <value nick="tightest" value="1"/>
+    <value nick="5h" value="2"/>
+    <value nick="7d" value="3"/>
+    <value nick="both" value="4"/>
+  </enum>
+
+  <schema id="org.gnome.shell.extensions.claude-swap"
+          path="/org/gnome/shell/extensions/claude-swap/">
+    <key name="refresh-interval" type="i">
+      <default>60</default>
+      <range min="30" max="600"/>
+      <summary>Seconds between usage refreshes</summary>
+    </key>
+    <key name="panel-text" enum="org.gnome.shell.extensions.claude-swap.panel-text">
+      <default>'tightest'</default>
+      <summary>Which percentages appear beside the panel icon</summary>
+    </key>
+    <key name="show-account-name" type="b">
+      <default>false</default>
+      <summary>Prefix the panel text with the account name</summary>
+    </key>
+    <key name="colour-code-icon" type="b">
+      <default>true</default>
+      <summary>Tint the panel icon as the tightest window fills</summary>
+    </key>
+    <key name="auto-switch" type="b">
+      <default>false</default>
+      <summary>Run an auto-switch tick after each refresh</summary>
+    </key>
+    <key name="notify-on-switch" type="b">
+      <default>true</default>
+      <summary>Notify when an auto-switch fires</summary>
+    </key>
+    <key name="cswap-path" type="s">
+      <default>''</default>
+      <summary>Path to the cswap binary; empty means auto-detect</summary>
+    </key>
+  </schema>
+</schemalist>
