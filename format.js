@@ -168,20 +168,58 @@ export function panelText(account, prefs, nowMs) {
     return segments.join(' · ');
 }
 
+// Severity bands, matched to claude-swap's TUI. WARN is where a user starts
+// caring; CRIT is the auto-switch trigger, so the colour and the behaviour
+// agree — raise the threshold and the red band moves with it.
+const WARN_PCT = 70;
+
+/** claude-swap's own autoswitch.threshold default, used until we read the real one. */
+export const DEFAULT_THRESHOLD = 90;
+
+/** Severity bucket for a percentage, given the active auto-switch threshold. */
+export function severityOf(pct, threshold) {
+    if (typeof pct !== 'number')
+        return 'ok';
+    const crit = typeof threshold === 'number' ? threshold : DEFAULT_THRESHOLD;
+    if (pct >= crit)
+        return 'crit';
+    if (pct >= WARN_PCT)
+        return 'warn';
+    return 'ok';
+}
+
+/**
+ * Pixel geometry for one usage bar.
+ *
+ * Kept here, away from the drawing code, so the clamping and rounding can be
+ * tested without a shell. `tickX` marks the auto-switch trigger and is held
+ * inside the track so it stays visible at 100%.
+ */
+export function barGeometry(pct, threshold, width) {
+    if (!(width > 0))
+        return {fillWidth: 0, tickX: null};
+
+    const clamped = typeof pct === 'number'
+        ? Math.min(Math.max(pct, 0), 100)
+        : 0;
+    const fillWidth = Math.round(width * clamped / 100);
+
+    let tickX = null;
+    if (typeof threshold === 'number') {
+        tickX = Math.min(width - 1,
+            Math.max(0, Math.round(width * threshold / 100)));
+    }
+
+    return {fillWidth, tickX};
+}
+
 /** Colour bucket for the panel icon, from the tightest window. */
-export function iconState(account, nowMs) {
+export function iconState(account, nowMs, threshold) {
     const usage = account?.usage;
     if (!usage)
         return 'ok';
     const rolled = {...usage, sevenDay: rolledWeeklyWindow(usage.sevenDay, nowMs)};
-    const p = tightestPct(rolled);
-    if (p === null)
-        return 'ok';
-    if (p > 95)
-        return 'crit';
-    if (p >= 80)
-        return 'warn';
-    return 'ok';
+    return severityOf(tightestPct(rolled), threshold);
 }
 
 /**

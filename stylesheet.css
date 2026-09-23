@@ -35,3 +35,51 @@
 .cswap-label {
   padding-left: 4px;
 }
+
+/* ---- usage bars ---------------------------------------------------------
+   The fill colour is the actor's `color`, read through the theme node by
+   usagebar.js; the track and tick are custom properties looked up the same
+   way. Severity tones follow claude-swap's TUI ramp, which is deliberately
+   desaturated so a row of bars reads calmly rather than shouting. */
+
+.cswap-bar {
+  height: 7px;
+  min-width: 90px;
+  -cswap-track-color: rgba(128, 128, 128, 0.35);
+  -cswap-tick-color: rgba(255, 255, 255, 0.55);
+}
+
+.cswap-bar-ok {
+  color: #87af87;
+}
+
+.cswap-bar-warn {
+  color: #d7af5f;
+}
+
+.cswap-bar-crit {
+  color: #d75f5f;
+}
+
+.cswap-bar-row {
+  spacing: 8px;
+  padding-top: 2px;
+}
+
+.cswap-bar-label {
+  font-size: 0.85em;
+  opacity: 0.55;
+  min-width: 20px;
+}
+
+.cswap-bar-pct {
+  font-size: 0.85em;
+  min-width: 34px;
+  text-align: right;
+}
+
+.cswap-bar-reset {
+  font-size: 0.85em;
+  opacity: 0.55;
+  min-width: 52px;
+}

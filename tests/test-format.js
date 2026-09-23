@@ -1,6 +1,7 @@
 import {test, assertEqual, assertNull, loadFixture} from './harness.js';
 import {tightestPct, liveCountdown, rolledWeeklyWindow, usageSummary,
-    accountLabel, panelText, iconState, accountsOf, snapshotSignature} from '../format.js';
+    accountLabel, panelText, iconState, accountsOf, snapshotSignature,
+    severityOf, barGeometry, DEFAULT_THRESHOLD} from '../format.js';
 
 const NOW = Date.parse('2026-09-23T01:40:00Z');
 
@@ -169,20 +170,25 @@ test('panelText omits the number when usage is unavailable', () => {
         '', 'no number to show');
 });
 
-test('iconState buckets below 80 as ok', () => {
-    assertEqual(iconState({usage: {fiveHour: {pct: 79.4}}}, NOW), 'ok', 'under threshold');
+test('iconState buckets below 70 as ok', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 69.4}}}, NOW), 'ok', 'under warn band');
 });
 
-test('iconState buckets 80 as warn', () => {
-    assertEqual(iconState({usage: {fiveHour: {pct: 80}}}, NOW), 'warn', 'boundary is warn');
+test('iconState buckets 70 as warn', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 70}}}, NOW), 'warn', 'warn boundary');
 });
 
-test('iconState buckets 95 as warn', () => {
-    assertEqual(iconState({usage: {fiveHour: {pct: 95}}}, NOW), 'warn', 'upper boundary');
+test('iconState buckets 89 as warn', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 89}}}, NOW), 'warn', 'below the trigger');
 });
 
-test('iconState buckets above 95 as crit', () => {
-    assertEqual(iconState({usage: {fiveHour: {pct: 95.1}}}, NOW), 'crit', 'over threshold');
+test('iconState goes crit at the auto-switch threshold', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 90}}}, NOW), 'crit', 'default threshold 90');
+});
+
+test('iconState crit follows a raised threshold', () => {
+    assertEqual(iconState({usage: {fiveHour: {pct: 90}}}, NOW, 95), 'warn', 'not yet at 95');
+    assertEqual(iconState({usage: {fiveHour: {pct: 95}}}, NOW, 95), 'crit', 'at 95');
 });
 
 test('iconState falls back to ok when usage is unknown', () => {
@@ -231,4 +237,66 @@ test('snapshotSignature changes when the active account changes', () => {
 test('snapshotSignature tolerates a malformed snapshot', () => {
     assertEqual(typeof snapshotSignature({accounts: 'nope'}, NOW), 'string', 'still a string');
     assertEqual(typeof snapshotSignature(null, NOW), 'string', 'still a string');
+});
+
+test('severityOf is ok below the warn band', () => {
+    assertEqual(severityOf(69.9, 90), 'ok', 'under 70');
+});
+
+test('severityOf warns from 70 inclusive', () => {
+    assertEqual(severityOf(70, 90), 'warn', 'boundary');
+    assertEqual(severityOf(89.9, 90), 'warn', 'just under the trigger');
+});
+
+test('severityOf goes crit at the threshold inclusive', () => {
+    assertEqual(severityOf(90, 90), 'crit', 'at the trigger');
+});
+
+test('severityOf tracks a lowered threshold', () => {
+    assertEqual(severityOf(80, 80), 'crit', 'threshold 80');
+    assertEqual(severityOf(79, 80), 'warn', 'just under');
+});
+
+test('severityOf falls back to the claude-swap default when unknown', () => {
+    assertEqual(DEFAULT_THRESHOLD, 90, 'claude-swap default');
+    assertEqual(severityOf(90, null), 'crit', 'null threshold uses 90');
+    assertEqual(severityOf(85, null), 'warn', 'still warn');
+});
+
+test('severityOf is ok when the percentage is unknown', () => {
+    assertEqual(severityOf(null, 90), 'ok', 'no colour alarm without data');
+});
+
+test('barGeometry fills proportionally', () => {
+    assertEqual(barGeometry(50, 90, 100).fillWidth, 50, 'half');
+    assertEqual(barGeometry(0, 90, 100).fillWidth, 0, 'empty');
+    assertEqual(barGeometry(100, 90, 100).fillWidth, 100, 'full');
+});
+
+test('barGeometry clamps out-of-range percentages', () => {
+    assertEqual(barGeometry(150, 90, 100).fillWidth, 100, 'over 100');
+    assertEqual(barGeometry(-5, 90, 100).fillWidth, 0, 'negative');
+});
+
+test('barGeometry draws no fill when the percentage is unknown', () => {
+    assertEqual(barGeometry(null, 90, 100).fillWidth, 0, 'no fill');
+});
+
+test('barGeometry places the tick at the threshold', () => {
+    assertEqual(barGeometry(50, 90, 100).tickX, 90, 'at 90%');
+});
+
+test('barGeometry keeps the tick inside the track', () => {
+    assertEqual(barGeometry(50, 100, 100).tickX, 99, 'never past the last pixel');
+    assertEqual(barGeometry(50, 0, 100).tickX, 0, 'never before the first');
+});
+
+test('barGeometry omits the tick when the threshold is unknown', () => {
+    assertNull(barGeometry(50, null, 100).tickX, 'no tick');
+});
+
+test('barGeometry survives a zero-width track', () => {
+    const g = barGeometry(50, 90, 0);
+    assertEqual(g.fillWidth, 0, 'nothing to fill');
+    assertNull(g.tickX, 'nowhere to put a tick');
 });
