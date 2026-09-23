@@ -12,10 +12,12 @@ This is a port of `cswap menubar` — claude-swap's macOS menu bar app, which is
   │  …   🌡 42°   18%    🤖 70%    wifi  vol  batt     │
   └────────────────────────────────────────────────────┘
                           │
-        ● alice                                  ← dot marks the active account
-          5h 70% (3h 41m) · 7d 45% (3d 8h)
-          bob
-          5h  0% · 7d 67% (7h 21m)
+        ○ alice
+          5h ▁▁▁▁▁▁▁▁▁▁┃▁▁   0%
+          7d ████▁▁▁▁▁▁┃▁▁  48%  3d 3h
+        ● bob                                    ← dot marks the active account
+          5h ████████▇▁┃▁▁  89%  3h 34m
+          7d ███████▁▁▁┃▁▁  77%  2h 34m
         ──────────────────────────────
           Rotate to next
           Switch to best
@@ -28,9 +30,14 @@ This is a port of `cswap menubar` — claude-swap's macOS menu bar app, which is
           Settings…
 ```
 
-The icon is colour-coded by the tightest of the 5-hour and 7-day windows — the one that
-will actually stop you first: normal below 80%, amber from 80–95%, red above 95%, and the
-accent colour briefly after an auto-switch fires.
+Each account gets a bar per window. The `┃` tick marks the auto-switch trigger, so you can
+see at a glance how much headroom is left before a switch fires.
+
+Severity follows claude-swap's own TUI: normal below 70%, amber from 70%, and red at your
+configured `autoswitch.threshold` (90% by default) — so the colour and the switching
+behaviour always agree. Raise the threshold and the red band moves with it. The panel icon
+uses the same bands, driven by the tightest of the two windows, plus the accent colour
+briefly after an auto-switch fires.
 
 ## Requirements
 
@@ -135,7 +142,7 @@ five minutes until one succeeds.
 ## Development
 
 ```bash
-/usr/bin/gjs -m tests/run.js     # 76 tests, no shell restart needed
+/usr/bin/gjs -m tests/run.js     # 90 tests, no shell restart needed
 ```
 
 `format.js` imports nothing from `gi://`, which is what lets the display logic run under
@@ -162,9 +169,10 @@ Monitoring and switching only. Adding, removing, disabling accounts and refreshi
 credentials stay in `cswap` and `cswap tui`, which have better affordances for them than a
 panel menu — particularly the OAuth browser flow and destructive confirmations.
 
-Known gaps: account rows do not set `label_actor`, so a screen reader announces nothing
-for them; the threshold submenu is not seeded across enables, so the first open shows a
-bare `Threshold` until the first read returns.
+Bars are drawn with Cairo rather than assembled from block glyphs the way the TUI does it:
+the menu is set in Cantarell, which is proportional, so glyph runs would come out ragged
+and the tick would drift off the value it marks. The geometry is a pure function in
+`format.js` and unit-tested; `usagebar.js` only paints.
 
 ## Credits
 

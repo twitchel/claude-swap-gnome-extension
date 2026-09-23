@@ -9,7 +9,9 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {panelText, iconState, accountLabel, usageSummary, accountsOf,
-    snapshotSignature} from './format.js';
+    snapshotSignature, severityOf, rolledWeeklyWindow, liveCountdown}
+    from './format.js';
+import {UsageBar} from './usagebar.js';
 
 const SWITCH_FLASH_MS = 3000;
 
@@ -117,7 +119,8 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
             this._icon.remove_style_class_name(cls);
 
         if (this._settings.get_boolean('colour-code-icon'))
-            this._icon.add_style_class_name(`cswap-${iconState(account, now)}`);
+            this._icon.add_style_class_name(
+                `cswap-${iconState(account, now, this._threshold)}`);
 
         if (this._stale)
             this._icon.add_style_class_name('cswap-stale');
@@ -166,20 +169,69 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
         this._safeRebuild();
     }
 
+    /** One `5h ▇▇▇▇░░┃░ 70% 3h 41m` line. */
+    _addBarRow(parent, label, window, now) {
+        const row = new St.BoxLayout({style_class: 'cswap-bar-row', x_expand: true});
+
+        row.add_child(new St.Label({
+            text: label,
+            style_class: 'cswap-bar-label',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+
+        const pct = window && typeof window.pct === 'number' ? window.pct : null;
+
+        const bar = new UsageBar();
+        bar.setValue(pct, this._threshold, severityOf(pct, this._threshold));
+        row.add_child(bar);
+
+        row.add_child(new St.Label({
+            text: pct === null ? '  –' : `${pct.toFixed(0)}%`,
+            style_class: 'cswap-bar-pct',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+
+        const countdown = window ? liveCountdown(window.resetsAt, now) : null;
+        row.add_child(new St.Label({
+            text: countdown ?? '',
+            style_class: 'cswap-bar-reset',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+
+        parent.add_child(row);
+    }
+
     _addAccountRow(account) {
         const item = new PopupMenu.PopupBaseMenuItem();
         const box = new St.BoxLayout({vertical: true, x_expand: true});
+        const now = Date.now();
 
-        box.add_child(new St.Label({text: accountLabel(account)}));
-        box.add_child(new St.Label({
-            text: usageSummary(account, Date.now()),
-            style_class: 'cswap-usage',
-        }));
+        const name = new St.Label({text: accountLabel(account)});
+        box.add_child(name);
+        // Without this a screen reader announces nothing for the row:
+        // PopupMenuItem sets it for you, a hand-built PopupBaseMenuItem does not.
+        item.label_actor = name;
+
+        const usable = account?.usageStatus === 'ok' && account?.usage;
+        if (usable) {
+            this._addBarRow(box, '5h', account.usage.fiveHour, now);
+            this._addBarRow(box, '7d',
+                rolledWeeklyWindow(account.usage.sevenDay, now), now);
+        } else {
+            // auth failure, backoff, or never polled — the text form says why
+            box.add_child(new St.Label({
+                text: usageSummary(account, now),
+                style_class: 'cswap-usage',
+            }));
+        }
 
         item.add_child(box);
+        // NO_DOT, not NONE: NONE omits the `popup-ornamented-menu-item` class,
+        // whose 6px left padding would leave inactive rows misaligned with the
+        // active one — obvious once the rows contain bars.
         item.setOrnament(account.active
             ? PopupMenu.Ornament.DOT
-            : PopupMenu.Ornament.NONE);
+            : PopupMenu.Ornament.NO_DOT);
 
         item.connect('activate', () => {
             if (this._handlers.onSwitchTo)
@@ -324,7 +376,15 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
             return;
         }
 
-        this._poll();
+        // Seed the threshold now rather than waiting for the first menu open:
+        // the bars draw their trigger tick from it, and the crit band follows it.
+        this._poll()
+            .then(() => this._client?.getThreshold())
+            .then(pct => {
+                if (!this._destroyed && pct !== undefined && pct !== null)
+                    this.setThresholdChoices(pct);
+            })
+            .catch(() => {});
         this._restartTimer();
     }
 
