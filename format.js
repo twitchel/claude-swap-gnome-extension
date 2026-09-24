@@ -254,3 +254,24 @@ export function snapshotSignature(snapshot, nowMs) {
         ].join('|'))
         .join('\n');
 }
+
+/**
+ * The body of the auto-switch notification.
+ *
+ * A switch event's `to` is claude-swap's account ref — `{number, email}` —
+ * not a slot number, so interpolating it straight into a string renders
+ * "[object Object]". Both fields are optional: `account_ref(None, email)`
+ * describes an account that was not a managed slot.
+ */
+export function switchedToText(to) {
+    const number = typeof to?.number === 'number' ? to.number : null;
+    const email = typeof to?.email === 'string' && to.email ? to.email : null;
+
+    if (number !== null && email)
+        return `Switched to account ${number} (${email})`;
+    if (number !== null)
+        return `Switched to account ${number}`;
+    if (email)
+        return `Switched to ${email}`;
+    return 'Switched account';
+}
