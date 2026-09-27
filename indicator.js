@@ -9,8 +9,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {panelText, iconState, accountLabel, usageSummary, accountsOf,
-    snapshotSignature, severityOf, rolledWeeklyWindow, liveCountdown}
-    from './format.js';
+    snapshotSignature, severityOf, rolledWeeklyWindow, liveCountdown,
+    switchedToText} from './format.js';
 import {UsageBar} from './usagebar.js';
 
 const SWITCH_FLASH_MS = 3000;
@@ -473,11 +473,8 @@ class ClaudeSwapIndicator extends PanelMenu.Button {
             if (code === 0) {
                 this.flashSwitched();
                 if (this._settings.get_boolean('notify-on-switch')) {
-                    const to = events.find(e => e.to !== undefined)?.to;
-                    Main.notify('Claude Swap',
-                        to !== undefined
-                            ? `Switched to account ${to}`
-                            : 'Switched account');
+                    const to = events.find(e => e.event === 'switch')?.to;
+                    Main.notify('Claude Swap', switchedToText(to));
                 }
                 await this._poll();
             } else if (code === 3) {

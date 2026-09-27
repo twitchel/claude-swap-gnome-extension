@@ -1,7 +1,7 @@
 import {test, assertEqual, assertNull, loadFixture} from './harness.js';
 import {tightestPct, liveCountdown, rolledWeeklyWindow, usageSummary,
     accountLabel, panelText, iconState, accountsOf, snapshotSignature,
-    severityOf, barGeometry, DEFAULT_THRESHOLD} from '../format.js';
+    severityOf, barGeometry, switchedToText, DEFAULT_THRESHOLD} from '../format.js';
 
 const NOW = Date.parse('2026-09-23T01:40:00Z');
 
@@ -299,4 +299,41 @@ test('barGeometry survives a zero-width track', () => {
     const g = barGeometry(50, 90, 0);
     assertEqual(g.fillWidth, 0, 'nothing to fill');
     assertNull(g.tickX, 'nowhere to put a tick');
+});
+
+test('switchedToText names the account behind the ref', () => {
+    assertEqual(
+        switchedToText({number: 2, email: 'bob@example.com'}),
+        'Switched to account 2 (bob@example.com)',
+        'the ref is an object, not a number');
+});
+
+test('switchedToText copes with a ref that has no number', () => {
+    // account_ref(None, email) — the account left was not a managed slot.
+    assertEqual(
+        switchedToText({number: null, email: 'bob@example.com'}),
+        'Switched to bob@example.com',
+        'no slot to name');
+});
+
+test('switchedToText copes with a ref that has no email', () => {
+    assertEqual(
+        switchedToText({number: 2}),
+        'Switched to account 2',
+        'slot only');
+});
+
+test('switchedToText falls back when there is no ref at all', () => {
+    assertEqual(switchedToText(null), 'Switched account', 'null ref');
+    assertEqual(switchedToText(undefined), 'Switched account', 'missing ref');
+    assertEqual(switchedToText({}), 'Switched account', 'empty ref');
+});
+
+test('switchedToText never interpolates an object', () => {
+    for (const ref of [{number: 2, email: 'b@e.com'}, {number: null, email: 'b@e.com'},
+        {number: 2}, {}, null, {number: {}, email: {}}]) {
+        const text = switchedToText(ref);
+        assertEqual(text.includes('[object Object]'), false,
+            `no raw object in "${text}"`);
+    }
 });
